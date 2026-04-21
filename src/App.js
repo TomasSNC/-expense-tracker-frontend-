@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, MapPin, Plus, LogOut, Download, Eye, Filter, X, Edit, Trash2, Image as ImageIcon } from 'lucide-react';
+import { Calendar, Plus, LogOut, Download, Eye, Filter, X, Edit, Trash2, Image as ImageIcon } from 'lucide-react';
 import './App.css';
 
 export default function App() {
@@ -336,16 +336,12 @@ export default function App() {
   );
 }
 
-function ChronologicalView({ trip, onUpdate }) {
+function ChronologicalView({ trip }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [showReceiptImage, setShowReceiptImage] = useState(null);
-
-  useEffect(() => {
-    fetchExpenses();
-  }, [trip.id]);
 
   const fetchExpenses = async () => {
     try {
@@ -357,6 +353,10 @@ function ChronologicalView({ trip, onUpdate }) {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    fetchExpenses();
+  }, [trip.id]);
 
   const handleEdit = (expense) => {
     setEditingId(expense.id);
@@ -533,16 +533,12 @@ function ChronologicalView({ trip, onUpdate }) {
   );
 }
 
-function GroupedByTypeView({ trip, onUpdate }) {
+function GroupedByTypeView({ trip }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [showReceiptImage, setShowReceiptImage] = useState(null);
-
-  useEffect(() => {
-    fetchExpenses();
-  }, [trip.id]);
 
   const fetchExpenses = async () => {
     try {
@@ -554,6 +550,10 @@ function GroupedByTypeView({ trip, onUpdate }) {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    fetchExpenses();
+  }, [trip.id]);
 
   const handleEdit = (expense) => {
     setEditingId(expense.id);
