@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Plus, LogOut, Download, Eye, Filter, X, Edit, Trash2, Image as ImageIcon } from 'lucide-react';
 import './App.css';
 
@@ -324,9 +324,9 @@ export default function App() {
 
             <div className="expenses-section">
               {groupBy === 'chronological' ? (
-                <ChronologicalView trip={selectedTrip} onUpdate={() => setSelectedTrip({ ...selectedTrip })} />
+                <ChronologicalView trip={selectedTrip} />
               ) : (
-                <GroupedByTypeView trip={selectedTrip} onUpdate={() => setSelectedTrip({ ...selectedTrip })} />
+                <GroupedByTypeView trip={selectedTrip} />
               )}
             </div>
           </div>
@@ -343,7 +343,7 @@ function ChronologicalView({ trip }) {
   const [editForm, setEditForm] = useState({});
   const [showReceiptImage, setShowReceiptImage] = useState(null);
 
-  const fetchExpenses = async () => {
+  const fetchExpenses = useCallback(async () => {
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses?tripId=${trip.id}`);
       const data = await response.json();
@@ -352,11 +352,11 @@ function ChronologicalView({ trip }) {
       console.error('Error fetching expenses:', error);
     }
     setLoading(false);
-  };
+  }, [trip.id]);
 
   useEffect(() => {
     fetchExpenses();
-  }, [trip.id]);
+  }, [fetchExpenses]);
 
   const handleEdit = (expense) => {
     setEditingId(expense.id);
@@ -540,7 +540,7 @@ function GroupedByTypeView({ trip }) {
   const [editForm, setEditForm] = useState({});
   const [showReceiptImage, setShowReceiptImage] = useState(null);
 
-  const fetchExpenses = async () => {
+  const fetchExpenses = useCallback(async () => {
     try {
       const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses?tripId=${trip.id}`);
       const data = await response.json();
@@ -549,11 +549,11 @@ function GroupedByTypeView({ trip }) {
       console.error('Error fetching expenses:', error);
     }
     setLoading(false);
-  };
+  }, [trip.id]);
 
   useEffect(() => {
     fetchExpenses();
-  }, [trip.id]);
+  }, [fetchExpenses]);
 
   const handleEdit = (expense) => {
     setEditingId(expense.id);
