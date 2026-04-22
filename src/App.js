@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Plus, LogOut, Download, Eye, Filter, X, Edit, Trash2, Image as ImageIcon } from 'lucide-react';
+import { Calendar, Plus, LogOut, Download, Eye, Filter, X, Edit, Trash2 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
+import SHA256 from 'crypto-js/sha256';
 import './App.css';
 
 // Initialize Supabase
@@ -9,7 +10,7 @@ const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 function hashPassword(password) {
-  return require('crypto').createHash('sha256').update(password).digest('hex');
+  return SHA256(password).toString();
 }
 
 export default function App() {
@@ -47,7 +48,7 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const hashedPassword = require('crypto').createHash('sha256').update(password).digest('hex');
+      const hashedPassword = hashPassword(password);
       
       const { data, error } = await supabase
         .from('users')
@@ -57,6 +58,7 @@ export default function App() {
 
       if (error) {
         alert(error.message || 'Sign up failed');
+        setLoading(false);
         return;
       }
 
@@ -79,7 +81,7 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const hashedPassword = require('crypto').createHash('sha256').update(password).digest('hex');
+      const hashedPassword = hashPassword(password);
       
       const { data, error } = await supabase
         .from('users')
@@ -89,11 +91,13 @@ export default function App() {
 
       if (error || !data) {
         alert('Invalid credentials');
+        setLoading(false);
         return;
       }
 
       if (hashedPassword !== data.password) {
         alert('Invalid credentials');
+        setLoading(false);
         return;
       }
 
@@ -387,7 +391,6 @@ function ChronologicalView({ trip }) {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
-  const [showReceiptImage, setShowReceiptImage] = useState(null);
 
   const fetchExpenses = useCallback(async () => {
     try {
