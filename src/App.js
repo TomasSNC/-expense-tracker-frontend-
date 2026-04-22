@@ -7,6 +7,14 @@ import './App.css';
 // Initialize Supabase
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+
+console.log('Supabase URL:', supabaseUrl);
+console.log('Supabase Key available:', !!supabaseAnonKey);
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase credentials!');
+}
+
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 function hashPassword(password) {
@@ -50,18 +58,21 @@ export default function App() {
     try {
       const hashedPassword = hashPassword(password);
       
-      const { data, error } = await supabase
+      const result = await supabase
         .from('users')
         .insert([{ username, password: hashedPassword }])
         .select()
         .single();
 
-      if (error) {
-        alert(error.message || 'Sign up failed');
+      console.log('Signup result:', result);
+
+      if (!result || result.error) {
+        alert(result?.error?.message || 'Sign up failed');
         setLoading(false);
         return;
       }
 
+      const data = result.data;
       setUser(data);
       localStorage.setItem('user', JSON.stringify(data));
       fetchTrips(data.id);
@@ -69,6 +80,7 @@ export default function App() {
       setPassword('');
       setIsSignUp(false);
     } catch (error) {
+      console.error('Signup error:', error);
       alert('Sign up error: ' + error.message);
     }
     setLoading(false);
@@ -83,18 +95,21 @@ export default function App() {
     try {
       const hashedPassword = hashPassword(password);
       
-      const { data, error } = await supabase
+      const result = await supabase
         .from('users')
         .select('*')
         .eq('username', username)
         .single();
 
-      if (error || !data) {
+      console.log('Login result:', result);
+
+      if (!result || result.error) {
         alert('Invalid credentials');
         setLoading(false);
         return;
       }
 
+      const data = result.data;
       if (hashedPassword !== data.password) {
         alert('Invalid credentials');
         setLoading(false);
@@ -107,6 +122,7 @@ export default function App() {
       setUsername('');
       setPassword('');
     } catch (error) {
+      console.error('Login error:', error);
       alert('Login error: ' + error.message);
     }
     setLoading(false);
@@ -114,23 +130,28 @@ export default function App() {
 
   const fetchTrips = async (userId) => {
     try {
-      const { data, error } = await supabase
+      const result = await supabase
         .from('trips')
         .select('*')
         .eq('userId', userId)
         .order('startDate', { ascending: false });
 
-      if (error) throw error;
+      console.log('Fetch trips result:', result);
+
+      if (!result || result.error) {
+        console.error('Error fetching trips:', result?.error);
+        return;
+      }
 
       // Calculate totals
       const tripsWithTotals = await Promise.all(
-        (data || []).map(async (trip) => {
-          const { data: expenses } = await supabase
+        (result.data || []).map(async (trip) => {
+          const expResult = await supabase
             .from('expenses')
             .select('amountInTripCurrency')
             .eq('tripId', trip.id);
 
-          const totalAmount = (expenses || [])
+          const totalAmount = (expResult.data || [])
             .reduce((sum, exp) => sum + parseFloat(exp.amountInTripCurrency || 0), 0);
 
           return { ...trip, totalAmount };
@@ -156,7 +177,7 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const { error } = await supabase
+      const result = await supabase
         .from('trips')
         .insert([{
           userId: user.id,
@@ -169,12 +190,19 @@ export default function App() {
         .select()
         .single();
 
-      if (error) throw error;
+      console.log('Create trip result:', result);
+
+      if (!result || result.error) {
+        alert(result?.error?.message || 'Error creating trip');
+        setLoading(false);
+        return;
+      }
 
       fetchTrips(user.id);
       setNewTripForm({ destination: '', startDate: '', endDate: '', currency: 'EUR', reason: '' });
       setShowNewTripForm(false);
     } catch (error) {
+      console.error('Error creating trip:', error);
       alert('Error creating trip: ' + error.message);
     }
     setLoading(false);
@@ -182,8 +210,16 @@ export default function App() {
 
   const handleExport = async (tripId) => {
     try {
-      const { data: trip } = await supabase.from('trips').select('*').eq('id', tripId).single();
-      const { data: expenses } = await supabase.from('expenses').select('*').eq('tripId', tripId);
+      const tripResult = await supabase.from('trips').select('*').eq('id', tripId).single();
+      const expResult = await supabase.from('expenses').select('*').eq('tripId', tripId);
+
+      if (!tripResult.data || !expResult.data) {
+        alert('Error loading data for export');
+        return;
+      }
+
+      const trip = tripResult.data;
+      const expenses = expResult.data;
 
       // Simple CSV export
       let csv = 'Date,Type,Description,Original Amount,Amount (' + trip.currency + '),Rate\n';
@@ -202,6 +238,7 @@ export default function App() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
+      console.error('Export error:', error);
       alert('Error exporting: ' + error.message);
     }
   };
@@ -394,16 +431,23 @@ function ChronologicalView({ trip }) {
 
   const fetchExpenses = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      const result = await supabase
         .from('expenses')
         .select('*')
         .eq('tripId', trip.id)
         .order('date', { ascending: false });
 
-      if (error) throw error;
-      setExpenses(data || []);
+      console.log('Fetch expenses result:', result);
+
+      if (!result || result.error) {
+        console.error('Error fetching expenses:', result?.error);
+        setExpenses([]);
+      } else {
+        setExpenses(result.data || []);
+      }
     } catch (error) {
       console.error('Error fetching expenses:', error);
+      setExpenses([]);
     }
     setLoading(false);
   }, [trip.id]);
@@ -419,15 +463,20 @@ function ChronologicalView({ trip }) {
 
   const handleSaveEdit = async () => {
     try {
-      const { error } = await supabase
+      const result = await supabase
         .from('expenses')
         .update(editForm)
         .eq('id', editingId);
 
-      if (error) throw error;
+      if (!result || result.error) {
+        alert(result?.error?.message || 'Error updating expense');
+        return;
+      }
+
       fetchExpenses();
       setEditingId(null);
     } catch (error) {
+      console.error('Error updating expense:', error);
       alert('Error updating expense: ' + error.message);
     }
   };
@@ -435,14 +484,19 @@ function ChronologicalView({ trip }) {
   const handleDelete = async (expenseId) => {
     if (window.confirm('Are you sure you want to delete this expense?')) {
       try {
-        const { error } = await supabase
+        const result = await supabase
           .from('expenses')
           .delete()
           .eq('id', expenseId);
 
-        if (error) throw error;
+        if (!result || result.error) {
+          alert(result?.error?.message || 'Error deleting expense');
+          return;
+        }
+
         fetchExpenses();
       } catch (error) {
+        console.error('Error deleting expense:', error);
         alert('Error deleting expense: ' + error.message);
       }
     }
@@ -554,15 +608,22 @@ function GroupedByTypeView({ trip }) {
 
   const fetchExpenses = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      const result = await supabase
         .from('expenses')
         .select('*')
         .eq('tripId', trip.id);
 
-      if (error) throw error;
-      setExpenses(data || []);
+      console.log('Fetch expenses result:', result);
+
+      if (!result || result.error) {
+        console.error('Error fetching expenses:', result?.error);
+        setExpenses([]);
+      } else {
+        setExpenses(result.data || []);
+      }
     } catch (error) {
       console.error('Error fetching expenses:', error);
+      setExpenses([]);
     }
     setLoading(false);
   }, [trip.id]);
@@ -578,15 +639,20 @@ function GroupedByTypeView({ trip }) {
 
   const handleSaveEdit = async () => {
     try {
-      const { error } = await supabase
+      const result = await supabase
         .from('expenses')
         .update(editForm)
         .eq('id', editingId);
 
-      if (error) throw error;
+      if (!result || result.error) {
+        alert(result?.error?.message || 'Error updating expense');
+        return;
+      }
+
       fetchExpenses();
       setEditingId(null);
     } catch (error) {
+      console.error('Error updating expense:', error);
       alert('Error updating expense: ' + error.message);
     }
   };
@@ -594,14 +660,19 @@ function GroupedByTypeView({ trip }) {
   const handleDelete = async (expenseId) => {
     if (window.confirm('Are you sure?')) {
       try {
-        const { error } = await supabase
+        const result = await supabase
           .from('expenses')
           .delete()
           .eq('id', expenseId);
 
-        if (error) throw error;
+        if (!result || result.error) {
+          alert(result?.error?.message || 'Error deleting expense');
+          return;
+        }
+
         fetchExpenses();
       } catch (error) {
+        console.error('Error deleting expense:', error);
         alert('Error: ' + error.message);
       }
     }
