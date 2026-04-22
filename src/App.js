@@ -156,7 +156,7 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('trips')
         .insert([{
           userId: user.id,
