@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Plus, LogOut, Download, Eye, Filter, X, Edit, Trash2, Image as ImageIcon } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 import './App.css';
+
+// Initialize Supabase
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+function hashPassword(password) {
+  return require('crypto').createHash('sha256').update(password).digest('hex');
+}
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -24,38 +34,11 @@ export default function App() {
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      fetchTrips(JSON.parse(savedUser).id);
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
+      fetchTrips(parsedUser.id);
     }
   }, []);
-
-  const handleLogin = async () => {
-    if (!username || !password) {
-      alert('Please enter username and password');
-      return;
-    }
-    setLoading(true);
-    try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setUser(data.user);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        fetchTrips(data.user.id);
-        setUsername('');
-        setPassword('');
-      } else {
-        alert(data.message || 'Login failed');
-      }
-    } catch (error) {
-      alert('Login error: ' + error.message);
-    }
-    setLoading(false);
-  };
 
   const handleSignUp = async () => {
     if (!username || !password) {
@@ -64,33 +47,93 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setUser(data.user);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        fetchTrips(data.user.id);
-        setUsername('');
-        setPassword('');
-        setIsSignUp(false);
-      } else {
-        alert(data.message || 'Sign up failed');
+      const hashedPassword = require('crypto').createHash('sha256').update(password).digest('hex');
+      
+      const { data, error } = await supabase
+        .from('users')
+        .insert([{ username, password: hashedPassword }])
+        .select()
+        .single();
+
+      if (error) {
+        alert(error.message || 'Sign up failed');
+        return;
       }
+
+      setUser(data);
+      localStorage.setItem('user', JSON.stringify(data));
+      fetchTrips(data.id);
+      setUsername('');
+      setPassword('');
+      setIsSignUp(false);
     } catch (error) {
       alert('Sign up error: ' + error.message);
     }
     setLoading(false);
   };
 
+  const handleLogin = async () => {
+    if (!username || !password) {
+      alert('Please enter username and password');
+      return;
+    }
+    setLoading(true);
+    try {
+      const hashedPassword = require('crypto').createHash('sha256').update(password).digest('hex');
+      
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', username)
+        .single();
+
+      if (error || !data) {
+        alert('Invalid credentials');
+        return;
+      }
+
+      if (hashedPassword !== data.password) {
+        alert('Invalid credentials');
+        return;
+      }
+
+      setUser(data);
+      localStorage.setItem('user', JSON.stringify(data));
+      fetchTrips(data.id);
+      setUsername('');
+      setPassword('');
+    } catch (error) {
+      alert('Login error: ' + error.message);
+    }
+    setLoading(false);
+  };
+
   const fetchTrips = async (userId) => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/trips?userId=${userId}`);
-      const data = await response.json();
-      setTrips(data);
+      const { data, error } = await supabase
+        .from('trips')
+        .select('*')
+        .eq('userId', userId)
+        .order('startDate', { ascending: false });
+
+      if (error) throw error;
+
+      // Calculate totals
+      const tripsWithTotals = await Promise.all(
+        (data || []).map(async (trip) => {
+          const { data: expenses } = await supabase
+            .from('expenses')
+            .select('amountInTripCurrency')
+            .eq('tripId', trip.id);
+
+          const totalAmount = (expenses || [])
+            .reduce((sum, exp) => sum + parseFloat(exp.amountInTripCurrency || 0), 0);
+
+          return { ...trip, totalAmount };
+        })
+      );
+
+      setTrips(tripsWithTotals);
     } catch (error) {
       console.error('Error fetching trips:', error);
     }
@@ -109,23 +152,24 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/trips`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data, error } = await supabase
+        .from('trips')
+        .insert([{
           userId: user.id,
           destination: newTripForm.destination,
           startDate: newTripForm.startDate,
           endDate: newTripForm.endDate,
           currency: newTripForm.currency,
           reason: newTripForm.reason || ''
-        })
-      });
-      if (response.ok) {
-        fetchTrips(user.id);
-        setNewTripForm({ destination: '', startDate: '', endDate: '', currency: 'EUR', reason: '' });
-        setShowNewTripForm(false);
-      }
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      fetchTrips(user.id);
+      setNewTripForm({ destination: '', startDate: '', endDate: '', currency: 'EUR', reason: '' });
+      setShowNewTripForm(false);
     } catch (error) {
       alert('Error creating trip: ' + error.message);
     }
@@ -134,12 +178,21 @@ export default function App() {
 
   const handleExport = async (tripId) => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/export/excel?tripId=${tripId}`);
-      const blob = await response.blob();
+      const { data: trip } = await supabase.from('trips').select('*').eq('id', tripId).single();
+      const { data: expenses } = await supabase.from('expenses').select('*').eq('tripId', tripId);
+
+      // Simple CSV export
+      let csv = 'Date,Type,Description,Original Amount,Amount (' + trip.currency + '),Rate\n';
+      
+      (expenses || []).forEach(exp => {
+        csv += `"${new Date(exp.date).toLocaleDateString()}","${exp.type}","${exp.description}","${exp.originalAmount} ${exp.originalCurrency}","${parseFloat(exp.amountInTripCurrency).toFixed(2)}","${parseFloat(exp.exchangeRate || 1).toFixed(4)}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `expenses_${selectedTrip.destination}.xlsx`;
+      a.download = `expenses_${trip.destination}.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -240,7 +293,7 @@ export default function App() {
                 />
                 <input
                   type="text"
-                  placeholder="Trip Reason (e.g., Workshop for OMT)"
+                  placeholder="Trip Reason (optional)"
                   value={newTripForm.reason}
                   onChange={(e) => setNewTripForm({ ...newTripForm, reason: e.target.value })}
                 />
@@ -294,16 +347,9 @@ export default function App() {
                 <p className="trip-dates">
                   {new Date(selectedTrip.startDate).toLocaleDateString()} - {new Date(selectedTrip.endDate).toLocaleDateString()}
                 </p>
-                {selectedTrip.reason && (
-                  <p className="trip-reason-detail">{selectedTrip.reason}</p>
-                )}
-              </div>
-              <div className="trip-currency-display">
-                <span className="currency-label">Trip Currency:</span>
-                <span className="currency-value">{selectedTrip.currency}</span>
               </div>
               <button className="btn-secondary" onClick={() => handleExport(selectedTrip.id)}>
-                <Download size={20} /> Export Excel
+                <Download size={20} /> Export CSV
               </button>
             </div>
 
@@ -345,9 +391,14 @@ function ChronologicalView({ trip }) {
 
   const fetchExpenses = useCallback(async () => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses?tripId=${trip.id}`);
-      const data = await response.json();
-      setExpenses(data.sort((a, b) => new Date(a.date) - new Date(b.date)));
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('tripId', trip.id)
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+      setExpenses(data || []);
     } catch (error) {
       console.error('Error fetching expenses:', error);
     }
@@ -365,15 +416,14 @@ function ChronologicalView({ trip }) {
 
   const handleSaveEdit = async () => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses/${editingId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm)
-      });
-      if (response.ok) {
-        fetchExpenses();
-        setEditingId(null);
-      }
+      const { error } = await supabase
+        .from('expenses')
+        .update(editForm)
+        .eq('id', editingId);
+
+      if (error) throw error;
+      fetchExpenses();
+      setEditingId(null);
     } catch (error) {
       alert('Error updating expense: ' + error.message);
     }
@@ -382,12 +432,13 @@ function ChronologicalView({ trip }) {
   const handleDelete = async (expenseId) => {
     if (window.confirm('Are you sure you want to delete this expense?')) {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses/${expenseId}`, {
-          method: 'DELETE'
-        });
-        if (response.ok) {
-          fetchExpenses();
-        }
+        const { error } = await supabase
+          .from('expenses')
+          .delete()
+          .eq('id', expenseId);
+
+        if (error) throw error;
+        fetchExpenses();
       } catch (error) {
         alert('Error deleting expense: ' + error.message);
       }
@@ -406,7 +457,7 @@ function ChronologicalView({ trip }) {
     <>
       <div className="expenses-list">
         {expenses.length === 0 ? (
-          <p className="no-expenses">Send your first receipt via Telegram to get started!</p>
+          <p className="no-expenses">No expenses yet!</p>
         ) : (
           expenses.map((expense) => (
             <div key={expense.id} className={`expense-item ${editingId === expense.id ? 'editing' : ''}`}>
@@ -422,30 +473,16 @@ function ChronologicalView({ trip }) {
                     step="0.01"
                     value={editForm.originalAmount}
                     onChange={(e) => setEditForm({ ...editForm, originalAmount: parseFloat(e.target.value) })}
-                    placeholder="Original Amount"
                   />
                   <input
                     type="text"
-                    value={editForm.originalCurrency}
-                    onChange={(e) => setEditForm({ ...editForm, originalCurrency: e.target.value.toUpperCase() })}
-                    placeholder="Currency"
-                    maxLength="3"
-                  />
-                  <select
                     value={editForm.type}
                     onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
-                  >
-                    <option value="Train">Train</option>
-                    <option value="Taxi">Taxi</option>
-                    <option value="Meals">Meals</option>
-                    <option value="Flight">Flight</option>
-                    <option value="Hotel">Hotel</option>
-                  </select>
+                  />
                   <input
                     type="text"
                     value={editForm.description}
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                    placeholder="Description"
                   />
                   <div className="edit-actions">
                     <button className="btn-save" onClick={handleSaveEdit}>Save</button>
@@ -462,25 +499,9 @@ function ChronologicalView({ trip }) {
                     </div>
                   </div>
                   <div className="expense-amount">
-                    <div className="amount-display">
-                      <span className="original-amount">{parseFloat(expense.originalAmount).toFixed(2)} {expense.originalCurrency}</span>
-                      <span className="arrow">→</span>
-                      <span className="converted-amount">{parseFloat(expense.amountInTripCurrency).toFixed(2)} {trip.currency}</span>
-                    </div>
-                    {expense.exchangeRate && (
-                      <div className="exchange-info">Rate: {parseFloat(expense.exchangeRate).toFixed(4)}</div>
-                    )}
+                    <span>{parseFloat(expense.originalAmount).toFixed(2)} {expense.originalCurrency} → {parseFloat(expense.amountInTripCurrency).toFixed(2)} {trip.currency}</span>
                   </div>
                   <div className="expense-actions">
-                    {expense.receiptImage && (
-                      <button 
-                        className="btn-icon" 
-                        title="View receipt"
-                        onClick={() => setShowReceiptImage(expense.receiptImage)}
-                      >
-                        <ImageIcon size={18} />
-                      </button>
-                    )}
                     <button 
                       className="btn-icon edit" 
                       onClick={() => handleEdit(expense)}
@@ -502,17 +523,6 @@ function ChronologicalView({ trip }) {
           ))
         )}
       </div>
-
-      {showReceiptImage && (
-        <div className="image-modal" onClick={() => setShowReceiptImage(null)}>
-          <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => setShowReceiptImage(null)}>
-              <X size={24} />
-            </button>
-            <img src={`data:image/jpeg;base64,${showReceiptImage}`} alt="Receipt" />
-          </div>
-        </div>
-      )}
 
       <div className="summary-section">
         <h3>Summary by Type</h3>
@@ -538,13 +548,16 @@ function GroupedByTypeView({ trip }) {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
-  const [showReceiptImage, setShowReceiptImage] = useState(null);
 
   const fetchExpenses = useCallback(async () => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses?tripId=${trip.id}`);
-      const data = await response.json();
-      setExpenses(data);
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('tripId', trip.id);
+
+      if (error) throw error;
+      setExpenses(data || []);
     } catch (error) {
       console.error('Error fetching expenses:', error);
     }
@@ -562,36 +575,36 @@ function GroupedByTypeView({ trip }) {
 
   const handleSaveEdit = async () => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses/${editingId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm)
-      });
-      if (response.ok) {
-        fetchExpenses();
-        setEditingId(null);
-      }
+      const { error } = await supabase
+        .from('expenses')
+        .update(editForm)
+        .eq('id', editingId);
+
+      if (error) throw error;
+      fetchExpenses();
+      setEditingId(null);
     } catch (error) {
       alert('Error updating expense: ' + error.message);
     }
   };
 
   const handleDelete = async (expenseId) => {
-    if (window.confirm('Are you sure you want to delete this expense?')) {
+    if (window.confirm('Are you sure?')) {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/api/expenses/${expenseId}`, {
-          method: 'DELETE'
-        });
-        if (response.ok) {
-          fetchExpenses();
-        }
+        const { error } = await supabase
+          .from('expenses')
+          .delete()
+          .eq('id', expenseId);
+
+        if (error) throw error;
+        fetchExpenses();
       } catch (error) {
-        alert('Error deleting expense: ' + error.message);
+        alert('Error: ' + error.message);
       }
     }
   };
 
-  if (loading) return <p>Loading expenses...</p>;
+  if (loading) return <p>Loading...</p>;
 
   const expensesByType = expenses.reduce((acc, exp) => {
     if (!acc[exp.type]) acc[exp.type] = [];
@@ -618,96 +631,40 @@ function GroupedByTypeView({ trip }) {
                 <span className="type-total">{typeTotal.toFixed(2)} {trip.currency}</span>
               </div>
               <div className="type-expenses">
-                {typeExpenses
-                  .sort((a, b) => new Date(a.date) - new Date(b.date))
-                  .map((expense) => (
-                    <div key={expense.id} className={`expense-item-grouped ${editingId === expense.id ? 'editing' : ''}`}>
-                      {editingId === expense.id ? (
-                        <div className="expense-edit-form">
-                          <input
-                            type="date"
-                            value={editForm.date}
-                            onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
-                          />
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={editForm.originalAmount}
-                            onChange={(e) => setEditForm({ ...editForm, originalAmount: parseFloat(e.target.value) })}
-                            placeholder="Original Amount"
-                          />
-                          <input
-                            type="text"
-                            value={editForm.originalCurrency}
-                            onChange={(e) => setEditForm({ ...editForm, originalCurrency: e.target.value.toUpperCase() })}
-                            placeholder="Currency"
-                            maxLength="3"
-                          />
-                          <input
-                            type="text"
-                            value={editForm.description}
-                            onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                            placeholder="Description"
-                          />
-                          <div className="edit-actions">
-                            <button className="btn-save" onClick={handleSaveEdit}>Save</button>
-                            <button className="btn-cancel" onClick={() => setEditingId(null)}>Cancel</button>
-                          </div>
+                {typeExpenses.map((expense) => (
+                  <div key={expense.id} className={`expense-item-grouped ${editingId === expense.id ? 'editing' : ''}`}>
+                    {editingId === expense.id ? (
+                      <div className="expense-edit-form">
+                        <input type="date" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} />
+                        <input type="number" step="0.01" value={editForm.originalAmount} onChange={(e) => setEditForm({ ...editForm, originalAmount: parseFloat(e.target.value) })} />
+                        <input type="text" value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+                        <div className="edit-actions">
+                          <button className="btn-save" onClick={handleSaveEdit}>Save</button>
+                          <button className="btn-cancel" onClick={() => setEditingId(null)}>Cancel</button>
                         </div>
-                      ) : (
-                        <>
-                          <div className="expense-info">
-                            <span className="expense-date">{new Date(expense.date).toLocaleDateString()}</span>
-                            <span className="expense-description">{expense.description}</span>
-                          </div>
-                          <div className="expense-amount">
-                            <span>{parseFloat(expense.originalAmount).toFixed(2)} {expense.originalCurrency} → {parseFloat(expense.amountInTripCurrency).toFixed(2)} {trip.currency}</span>
-                          </div>
-                          <div className="expense-actions">
-                            {expense.receiptImage && (
-                              <button 
-                                className="btn-icon" 
-                                title="View receipt"
-                                onClick={() => setShowReceiptImage(expense.receiptImage)}
-                              >
-                                <ImageIcon size={16} />
-                              </button>
-                            )}
-                            <button 
-                              className="btn-icon edit" 
-                              onClick={() => handleEdit(expense)}
-                              title="Edit"
-                            >
-                              <Edit size={16} />
-                            </button>
-                            <button 
-                              className="btn-icon delete" 
-                              onClick={() => handleDelete(expense.id)}
-                              title="Delete"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="expense-info">
+                          <span className="expense-date">{new Date(expense.date).toLocaleDateString()}</span>
+                          <span className="expense-description">{expense.description}</span>
+                        </div>
+                        <div className="expense-amount">
+                          <span>{parseFloat(expense.originalAmount).toFixed(2)} {expense.originalCurrency} → {parseFloat(expense.amountInTripCurrency).toFixed(2)} {trip.currency}</span>
+                        </div>
+                        <div className="expense-actions">
+                          <button className="btn-icon edit" onClick={() => handleEdit(expense)}><Edit size={16} /></button>
+                          <button className="btn-icon delete" onClick={() => handleDelete(expense.id)}><Trash2 size={16} /></button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           );
         })}
       </div>
-
-      {showReceiptImage && (
-        <div className="image-modal" onClick={() => setShowReceiptImage(null)}>
-          <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => setShowReceiptImage(null)}>
-              <X size={24} />
-            </button>
-            <img src={`data:image/jpeg;base64,${showReceiptImage}`} alt="Receipt" />
-          </div>
-        </div>
-      )}
 
       <div className="summary-section">
         <div className="summary-total">
